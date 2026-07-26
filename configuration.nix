@@ -134,8 +134,10 @@
   Super + F3                    displayselect  (multi-monitor arrangement)
   Super + F4                    pulsemixer     (audio mixer)
   Super + F5                    reload Xresources and restart dwmblocks
-  Super + F6                    torwrap        (start/stop tor daemon)
-  Super + F7                    td-toggle      (transmission daemon)
+  Super + F6                    torwrap — despite the name this is about
+                                TORRENTS, not Tor: it starts transmission-daemon
+                                and opens the `stig` torrent client
+  Super + F7                    td-toggle      (start/stop transmission-daemon)
   Super + F8                    mailsync       (sync mail)
   Super + F9                    mounter        (mount a drive / phone)
   Super + F10                   unmounter      (unmount it again)
@@ -694,8 +696,12 @@ in
 
   # ══════════════════════════════════════════════════════════════════════════
   # 12 · TOR
-  #  Super + F6 toggles the daemon via LARBS's `torwrap`; the service below
-  #  is the always-on alternative. Super + Shift + Tab opens Tor Browser.
+  #  Super + Shift + Tab opens Tor Browser; `torsocks <cmd>` routes anything
+  #  else through the daemon below.
+  #
+  #  Note that LARBS's Super+F6 `torwrap` has nothing to do with Tor — it is
+  #  a *torrent* wrapper (transmission + stig). Same three letters, different
+  #  program. Both are wired up; they are just unrelated.
   # ══════════════════════════════════════════════════════════════════════════
   services.tor = {
     enable = true;
@@ -773,6 +779,11 @@ in
     BROWSER = "firefox";
     READER = "zathura";
     FILE = "lfub";
+    # `mounter` and `unmounter` (Super+F9 / Super+F10) call `sudo -A`, which
+    # does nothing at all unless SUDO_ASKPASS points at a password prompt.
+    # Upstream sets this in ~/.zprofile to a path under ~/.local/bin; here the
+    # scripts live in the store, so point at them directly.
+    SUDO_ASKPASS = "${pkgs.larbs-scripts}/bin/dmenupass";
     # Keep $HOME tidy, the way LARBS does.
     XDG_CONFIG_HOME = "$HOME/.config";
     XDG_DATA_HOME = "$HOME/.local/share";
@@ -1077,6 +1088,14 @@ in
     wget curl git gnumake
     bc                       # Super+apostrophe calculator, Ctrl+a in zsh
     trash-cli
+    psmisc                   # `killall`, which several bindings below need:
+                             #   Super+F3 displayselect, Super+F7 td-toggle,
+                             #   Super+F12 remaps, Super+ScrollLock screenkey,
+                             #   and dwm's own bar restart on Super+F5.
+                             # NixOS's base system ships procps but not psmisc.
+    pulseaudio               # for `pactl`, which the mic-mute media key calls.
+                             # PipeWire is still the sound server (section 10);
+                             # this is only the client tool.
     ts                       # task-spooler, used by LARBS's queue scripts
 
     # ---- media ----------------------------------------------------------
@@ -1104,6 +1123,12 @@ in
     calcurse
     sc-im
 
+    # ---- torrents (Super+F6 `torwrap`, Super+F7 `td-toggle`) ------------
+    # Nothing to do with Tor, despite the script name — see section 12.
+    # torwrap bails out immediately unless both of these are present.
+    transmission_4           # provides transmission-daemon
+    stig                     # the TUI client torwrap actually opens
+
     # ---- X11 utilities the keybindings depend on ------------------------
     xinit
     xrdb                # Super+F5
@@ -1112,6 +1137,8 @@ in
     xset
     setxkbmap
     xbacklight
+    xrandr                   # displayselect (Super+F3) and dmenurecord drive this
+    slop                     # region selection for dmenurecord (Super+Print)
     xclip                    # the "+ register in nvim and tmux's y binding
     xdotool                  # Super+Insert snippet expansion
     xcape                    # Super+F12 remaps
@@ -1126,6 +1153,11 @@ in
     tesseract                # OCR option inside maimpick
     wmctrl
     groff                    # renders larbs.mom for Super+F1
+
+    # The XF86Sleep media key runs `sudo -A zzz`, which is a Void Linux
+    # script that does not exist here. This is the NixOS equivalent, so the
+    # key does something instead of failing silently.
+    (writeShellScriptBin "zzz" ''exec systemctl suspend "$@"'')
 
     # ---- virtualisation --------------------------------------------------
     qemu                     # Super+Shift+s opens virt-manager on top of this

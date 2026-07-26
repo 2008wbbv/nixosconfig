@@ -88,3 +88,25 @@ The config evaluates against nixpkgs 26.05 with no errors and no deprecation
 warnings, and all five from-source packages (dwm, st, dmenu, dwmblocks, and the
 voidrice helper scripts) compile. The added keybindings were confirmed present
 in the built `dwm` binary.
+
+Every binding was then traced to the program it actually launches — including
+the commands the LARBS helper scripts shell out to internally, which is where
+most of the gaps were.
+
+### Bindings that need setup before they do anything
+
+These work, but only once you have configured the thing behind them:
+
+| Binding | Needs |
+|---|---|
+| `Super+e`, `Super+F8` | a mail account — run `mw -a you@example.com` first |
+| `Super+Shift+d` | an initialised `pass` store (`pass init <gpg-id>`) |
+| `Super+c` | an XMPP account in profanity |
+| `Super+m` and the music keys | music in `~/Music` (mpd is already running) |
+| `Super+Insert` | a `~/.local/share/larbs/snippets` file you write yourself |
+
+### Known dead
+
+The touchpad-toggle media keys call `synclient`, from the old X synaptics
+driver. This config uses libinput instead, so those keys do nothing. Use your
+laptop's own touchpad toggle, or the libinput settings in section 8.
