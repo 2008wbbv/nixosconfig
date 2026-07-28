@@ -71,7 +71,10 @@ All in section 0, at the top of `configuration.nix`:
 | Setting | Default | What it does |
 |---|---|---|
 | `stAlpha` | `0.72` | Terminal transparency. Lower = more see-through. `Alt+a` / `Alt+s` adjust it live in a running terminal if you want to find your number first. |
-| `useUEFI` | `true` | Set `false` on a BIOS/MBR machine, and set `grub.device` in section 4 to your disk. |
+| `useUEFI` | `true` | Set `false` on a BIOS/MBR machine. |
+| `useGrub` | `true` | GRUB (themeable) vs systemd-boot (simpler, but **cannot** be themed). |
+| `grubTheme` | `catppuccin-grub` | Boot menu theme. `sleek-grub-theme` is the other packaged option; `null` for plain. |
+| `grubResolution` | `auto` | Boot menu graphics mode. Set an exact resolution if the menu looks wrong. |
 | `seedLarbsDotfiles` | `true` | Whether to copy Luke's dotfiles into `$HOME` on first activation. |
 
 Transparency needs a compositor, which section 8 starts (`xcompmgr`) before dwm.
@@ -86,6 +89,9 @@ Most first-build failures on a laptop are one of these:
 
 1. **UEFI vs BIOS mismatch.** Run `[ -d /sys/firmware/efi ] && echo UEFI || echo BIOS`
    and set `useUEFI` to match. This is the most common one by far.
+   Then check where your EFI partition is (`lsblk -f`, it's the small FAT32 one)
+   and set `espMountPoint` — `/boot` and `/boot/efi` are both common, and a
+   mismatch gives you a "failed to install the boot loader" error.
 2. **Wifi firmware.** `hardware.enableRedistributableFirmware` is on in section 5.
    Without it most Intel/Broadcom/Realtek cards do not appear at all — no error,
    just no interface.

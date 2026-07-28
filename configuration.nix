@@ -204,7 +204,8 @@ let
   # ══════════════════════════════════════════════════════════════════════════
   username = "samadams";
   fullName = "Sam Adams";
-  hostName = "samadams-nixos";
+  # Your shell prompt is user@host, so this is what makes it `samadams@live`.
+  hostName = "live";
   # Pinned so that /run/user/<uid> is predictable — mpd needs that path in
   # section 10 to find the user's PipeWire socket.
   userUid = 1000;
@@ -227,9 +228,34 @@ let
   # Getting these wrong is the most common reason a rebuild blows up. See the
   # troubleshooting block at the top of section 4 before changing them.
 
-  # true = UEFI (systemd-boot). false = older BIOS/MBR machine (GRUB).
+  # true = UEFI firmware. false = older BIOS/MBR machine.
   # Check with:  [ -d /sys/firmware/efi ] && echo UEFI || echo BIOS
   useUEFI = true;
+
+  # GRUB or systemd-boot?
+  #
+  # This is GRUB because you wanted a boot theme, and systemd-boot simply
+  # cannot do that — it is a plain text menu drawn by the firmware, with no
+  # theming support of any kind. GRUB draws its own graphical menu, so it is
+  # the only one of the two that can be styled.
+  #
+  # Set false to go back to systemd-boot (simpler, faster, no theme).
+  useGrub = true;
+
+  # The theme itself. Both of these are packaged in nixpkgs and both were
+  # checked to be real theme directories (a theme.txt plus its assets):
+  #
+  #   pkgs.catppuccin-grub                                    (mocha, default)
+  #   pkgs.catppuccin-grub.override { flavor = "macchiato"; } (also: frappe, latte)
+  #   pkgs.sleek-grub-theme.override { withStyle = "dark"; }  (also: light, orange, bigSur)
+  #
+  # Set to null for a plain unthemed GRUB.
+  grubTheme = pkgs.catppuccin-grub;
+
+  # The theme needs a graphical mode to draw into. If the menu comes up
+  # garbled or at the wrong size, try "auto", or match your panel exactly
+  # (e.g. "1366x768"). "auto" is the safe fallback.
+  grubResolution = "auto";
 
   # Where your EFI System Partition is mounted. NixOS's installer guide uses
   # /boot, but plenty of setups (and dual-boots alongside Windows) use
@@ -594,16 +620,56 @@ in
   #  Whatever the error, `nixos-rebuild switch 2>&1 | tail -30` shows the
   #  real cause — NixOS prints a lot before the useful line.
   # ══════════════════════════════════════════════════════════════════════════
-  boot.loader = if useUEFI then {
-    systemd-boot.enable = true;
-    systemd-boot.configurationLimit = 10;
-    efi.canTouchEfiVariables = touchEfiVars;
-    efi.efiSysMountPoint = espMountPoint;
-  } else {
-    grub.enable = true;
-    grub.device = grubDevice;     # <- the DISK, not a partition
-    grub.configurationLimit = 10;
-  };
+  #  ── 4. THEMES ─────────────────────────────────────────────────────────
+  #  systemd-boot cannot be themed at all. If you want a boot theme you must
+  #  be on GRUB — set `useGrub = true` in section 0 (it already is).
+  # ══════════════════════════════════════════════════════════════════════════
+  boot.loader = lib.mkMerge [
+    # EFI settings apply to both bootloaders, but only on UEFI machines —
+    # setting them on a BIOS box trips a NixOS assertion.
+    (lib.mkIf useUEFI {
+      efi.canTouchEfiVariables = touchEfiVars;
+      efi.efiSysMountPoint = espMountPoint;
+    })
+
+    (lib.mkIf useGrub {
+      grub = {
+        enable = true;
+        configurationLimit = 10;
+
+        # On UEFI, GRUB is installed into the ESP and "device" must be the
+        # literal string "nodev" — there is no MBR to write to. On BIOS it
+        # is the actual disk.
+        efiSupport = useUEFI;
+        device = if useUEFI then "nodev" else grubDevice;
+
+        # The theme, plus the graphics mode it gets drawn into.
+        theme = grubTheme;
+        gfxmodeEfi = grubResolution;
+        gfxmodeBios = grubResolution;
+
+        # Uncomment if you dual-boot and want Windows/other distros detected.
+        # useOSProber = true;
+      };
+    })
+
+    (lib.mkIf (!useGrub) {
+      systemd-boot.enable = true;
+      systemd-boot.configurationLimit = 10;
+    })
+  ];
+
+  # systemd-boot is UEFI-only; catch the impossible combination at build time
+  # with a clear message rather than a confusing failure at install time.
+  assertions = [
+    {
+      assertion = useGrub || useUEFI;
+      message = ''
+        systemd-boot requires UEFI firmware. This machine is configured as
+        BIOS (useUEFI = false), so set useGrub = true in section 0.
+      '';
+    }
+  ];
 
   # Quieter boot, in keeping with the rest of the setup.
   boot.kernelParams = [ "quiet" "udev.log_level=3" ];
