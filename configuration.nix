@@ -250,7 +250,20 @@ let
   #   pkgs.sleek-grub-theme.override { withStyle = "dark"; }  (also: light, orange, bigSur)
   #
   # Set to null for a plain unthemed GRUB.
-  grubTheme = pkgs.catppuccin-grub;
+  #
+  # Defaulting to sleek/dark rather than catppuccin purely on size: catppuccin
+  # is 2.7M (2.3M of that is one font file) against sleek's 392K, and /boot is
+  # the one filesystem on this machine that is actually tight.
+  grubTheme = pkgs.sleek-grub-theme.override { withStyle = "dark"; };
+
+  # How many old generations to keep entries for in the boot menu.
+  #
+  # This is the setting that fills /boot. NixOS keeps a kernel AND an initrd
+  # in /boot for every generation listed here, and those run 100-150M EACH.
+  # At the previous value of 10 that is well over a gigabyte — more than most
+  # EFI partitions hold, which is exactly the "No space left on device" you
+  # hit. Three is plenty to roll back with.
+  bootGenerationLimit = 3;
 
   # The theme needs a graphical mode to draw into. If the menu comes up
   # garbled or at the wrong size, try "auto", or match your panel exactly
@@ -588,22 +601,38 @@ in
   # ══════════════════════════════════════════════════════════════════════════
   #  4 · BOOT — read this if the rebuild is failing
   #
-  #  ── 0. ARE YOU ON THE INSTALLER ISO? ──────────────────────────────────
-  #  The config you were running had `hostName = "live"`, which is the
-  #  hostname of the NixOS installer ISO. If you are booted off the USB,
-  #  `nixos-rebuild switch` is the WRONG command and WILL fail on the
-  #  bootloader — the ISO's /boot is a read-only squashfs, not your ESP.
-  #  From the installer you want, roughly:
+  #  ── 0. "No space left on device" / "mkdir /boot/grub" ─────────────────
+  #  /boot is full. It is almost never actually about GRUB — NixOS keeps a
+  #  kernel and an initrd in /boot for EVERY generation in the boot menu, at
+  #  100-150M each, and EFI partitions are often only 512M (100M on laptops
+  #  that shipped with Windows). `bootGenerationLimit` in section 0 is now 3
+  #  instead of 10, which is the durable fix. To dig out right now:
   #
-  #      mount /dev/<root-partition> /mnt
-  #      mkdir -p /mnt/boot && mount /dev/<esp-partition> /mnt/boot
-  #      nixos-generate-config --root /mnt
-  #      cp configuration.nix /mnt/etc/nixos/configuration.nix
-  #      nixos-install                # <- not nixos-rebuild
-  #      reboot
+  #      df -h /boot                     # how bad is it
+  #      du -sh /boot/* | sort -h        # what is eating it
   #
-  #  Only once you have rebooted into the installed system does
-  #  `sudo nixos-rebuild switch` become the right command.
+  #      # 1. Drop old generations. This is what frees the kernels.
+  #      sudo nix-collect-garbage -d
+  #
+  #      # 2. Re-run the CURRENTLY BOOTED bootloader so it prunes /boot
+  #      #    entries for the generations you just deleted. Uses the
+  #      #    bootloader that already works, so it cannot strand you.
+  #      sudo /run/current-system/bin/switch-to-configuration boot
+  #
+  #      df -h /boot                     # should have room now
+  #      sudo nixos-rebuild switch
+  #
+  #  Do NOT hand-delete /boot/loader or /boot/EFI to make room before the
+  #  new bootloader is installed — if the install then fails you have no
+  #  bootloader at all and the machine will not come back up. Free space via
+  #  garbage collection first, always.
+  #
+  #  Old systemd-boot files are not cleaned up when you move to GRUB. Once
+  #  you have successfully booted via GRUB, and only then, /boot/loader and
+  #  /boot/EFI/systemd are dead weight and safe to remove.
+  #
+  #  If /boot is under ~300M even when empty, it is genuinely too small for
+  #  NixOS. Set bootGenerationLimit = 1, or resize the ESP.
   #
   #  ── 1. UEFI vs BIOS ───────────────────────────────────────────────────
   #      [ -d /sys/firmware/efi ] && echo UEFI || echo BIOS
@@ -619,7 +648,7 @@ in
   #
   #  Whatever the error, `nixos-rebuild switch 2>&1 | tail -30` shows the
   #  real cause — NixOS prints a lot before the useful line.
-  # ══════════════════════════════════════════════════════════════════════════
+  #
   #  ── 4. THEMES ─────────────────────────────────────────────────────────
   #  systemd-boot cannot be themed at all. If you want a boot theme you must
   #  be on GRUB — set `useGrub = true` in section 0 (it already is).
@@ -635,7 +664,7 @@ in
     (lib.mkIf useGrub {
       grub = {
         enable = true;
-        configurationLimit = 10;
+        configurationLimit = bootGenerationLimit;
 
         # On UEFI, GRUB is installed into the ESP and "device" must be the
         # literal string "nodev" — there is no MBR to write to. On BIOS it
@@ -655,7 +684,7 @@ in
 
     (lib.mkIf (!useGrub) {
       systemd-boot.enable = true;
-      systemd-boot.configurationLimit = 10;
+      systemd-boot.configurationLimit = bootGenerationLimit;
     })
   ];
 
