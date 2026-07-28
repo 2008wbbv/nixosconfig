@@ -223,9 +223,29 @@ let
   # Section 2 patches both, so changing this one line is enough.
   stAlpha = "0.72";
 
-  # Set false on an older BIOS/MBR machine — see section 4. Getting this wrong
-  # is the most common reason a first `nixos-rebuild switch` blows up.
+  # ── BOOTLOADER ────────────────────────────────────────────────────────────
+  # Getting these wrong is the most common reason a rebuild blows up. See the
+  # troubleshooting block at the top of section 4 before changing them.
+
+  # true = UEFI (systemd-boot). false = older BIOS/MBR machine (GRUB).
+  # Check with:  [ -d /sys/firmware/efi ] && echo UEFI || echo BIOS
   useUEFI = true;
+
+  # Where your EFI System Partition is mounted. NixOS's installer guide uses
+  # /boot, but plenty of setups (and dual-boots alongside Windows) use
+  # /boot/efi. Check with:  lsblk -f   — the ESP is the small vfat/FAT32 one.
+  # If this does not match, systemd-boot installation fails.
+  espMountPoint = "/boot";
+
+  # Writing EFI variables fails on some firmware and in some VMs. If the
+  # rebuild dies with an efivars / "Failed to write" style error, set this
+  # false — the system still boots, you just have to pick NixOS in the
+  # firmware boot menu the first time.
+  touchEfiVars = true;
+
+  # BIOS only: the DISK to install GRUB onto, not a partition.
+  # /dev/sda and /dev/nvme0n1 are right; /dev/sda1 is wrong.
+  grubDevice = "/dev/sda";
 
   # ══════════════════════════════════════════════════════════════════════════
   #  Extra dwm keybindings, injected into upstream's config.h.
@@ -540,20 +560,48 @@ in
   nixpkgs.config.permittedInsecurePackages = [ ];
 
   # ══════════════════════════════════════════════════════════════════════════
-  #  4 · BOOT
+  #  4 · BOOT — read this if the rebuild is failing
   #
-  #  If `nixos-rebuild switch` fails here, it is almost always a UEFI/BIOS
-  #  mismatch. Check with:  [ -d /sys/firmware/efi ] && echo UEFI || echo BIOS
-  #  then set `useUEFI` in section 0 to match. On BIOS you must also point
-  #  `grubDevice` below at your actual disk (e.g. /dev/sda, /dev/nvme0n1).
+  #  ── 0. ARE YOU ON THE INSTALLER ISO? ──────────────────────────────────
+  #  The config you were running had `hostName = "live"`, which is the
+  #  hostname of the NixOS installer ISO. If you are booted off the USB,
+  #  `nixos-rebuild switch` is the WRONG command and WILL fail on the
+  #  bootloader — the ISO's /boot is a read-only squashfs, not your ESP.
+  #  From the installer you want, roughly:
+  #
+  #      mount /dev/<root-partition> /mnt
+  #      mkdir -p /mnt/boot && mount /dev/<esp-partition> /mnt/boot
+  #      nixos-generate-config --root /mnt
+  #      cp configuration.nix /mnt/etc/nixos/configuration.nix
+  #      nixos-install                # <- not nixos-rebuild
+  #      reboot
+  #
+  #  Only once you have rebooted into the installed system does
+  #  `sudo nixos-rebuild switch` become the right command.
+  #
+  #  ── 1. UEFI vs BIOS ───────────────────────────────────────────────────
+  #      [ -d /sys/firmware/efi ] && echo UEFI || echo BIOS
+  #  Set `useUEFI` in section 0 to match.
+  #
+  #  ── 2. WHERE IS THE ESP? ──────────────────────────────────────────────
+  #      lsblk -f        # the small vfat/FAT32 partition
+  #  Set `espMountPoint`. A mismatch here is the classic
+  #  "installing systemd-boot failed" / "not a FAT filesystem" error.
+  #
+  #  ── 3. EFI VARIABLE WRITES ────────────────────────────────────────────
+  #  If it fails writing efivars, set `touchEfiVars = false` in section 0.
+  #
+  #  Whatever the error, `nixos-rebuild switch 2>&1 | tail -30` shows the
+  #  real cause — NixOS prints a lot before the useful line.
   # ══════════════════════════════════════════════════════════════════════════
   boot.loader = if useUEFI then {
     systemd-boot.enable = true;
     systemd-boot.configurationLimit = 10;
-    efi.canTouchEfiVariables = true;
+    efi.canTouchEfiVariables = touchEfiVars;
+    efi.efiSysMountPoint = espMountPoint;
   } else {
     grub.enable = true;
-    grub.device = "/dev/sda";     # <- the DISK, not a partition
+    grub.device = grubDevice;     # <- the DISK, not a partition
     grub.configurationLimit = 10;
   };
 
@@ -1283,6 +1331,16 @@ in
     poppler-utils            # lf's PDF previews
     man-pages man-pages-posix
     xdg-utils
+
+    # ---- added by you ----------------------------------------------------
+    feh                      # image viewer; also a common wallpaper setter.
+                             # Note LARBS's `setbg` uses xwallpaper (already
+                             # installed in the X11 block above), so feh is
+                             # here as a viewer rather than as the wallpaper
+                             # mechanism — `feh --bg-scale <img>` still works
+                             # if you prefer it.
+    python3
+    sherlock                 # OSINT: hunt a username across social networks
   ];
 
   # st ships its own terminfo; make sure it lands in the system path so that
