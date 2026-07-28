@@ -272,11 +272,11 @@ let
 
   # Where your EFI System Partition is mounted.
   #
-  # ⚠ IF YOUR ESP IS SMALL (yours is ~70M), READ THE "TINY ESP" BLOCK AT THE
-  #   TOP OF SECTION 4. NixOS's own installer creates a 512M ESP, and a
-  #   single generation's kernel + initrd is most of that on its own, so 70M
-  #   cannot work while /boot IS the ESP. The fix is to stop putting kernels
-  #   on the ESP — set this to "/boot/efi" once you have moved the mount.
+  # ⚠ IF YOUR ESP IS SMALL (yours is 196M), READ THE "SMALL ESP" BLOCK AT THE
+  #   TOP OF SECTION 4. NixOS's own installer creates a 512M ESP, and a single
+  #   generation's kernel + initrd can be 100M+, so 196M cannot hold several
+  #   while /boot IS the ESP. The fix is to stop putting kernels on the ESP —
+  #   set this to "/boot/efi" once you have moved the mount.
   espMountPoint = "/boot";
 
   # Writing EFI variables fails on some firmware and in some VMs. If the
@@ -634,18 +634,20 @@ in
   #  you have successfully booted via GRUB, and only then, /boot/loader and
   #  /boot/EFI/systemd are dead weight and safe to remove.
   #
-  #  ── 0b. TINY ESP (yours is ~70M) ──────────────────────────────────────
+  #  ── 0b. SMALL ESP (yours is 196M total) ───────────────────────────────
   #  For reference, NixOS's own installation manual partitions a 512M ESP:
   #      parted /dev/sda -- mkpart ESP fat32 1MB 512MB
-  #  70M cannot hold one kernel + initrd, let alone three, so no amount of
-  #  garbage collecting fixes it while /boot IS the ESP.
+  #  A kernel + initrd runs to 100M+ per generation, so 196M does not hold
+  #  three of them, and during a rebuild the OLD and NEW kernels both have to
+  #  be present at once — which is why even bootGenerationLimit = 1 is fragile
+  #  here. Garbage collecting buys a rebuild or two, not a fix.
   #
   #  The good news is that moving to GRUB already solved the hard part.
   #  systemd-boot can only read FAT, so it forces kernels onto the ESP.
   #  GRUB reads ext4/btrfs directly and keeps kernels in <bootpath>/kernels
   #  (install-grub.pl), which does NOT have to be the ESP. So:
   #
-  #    Keep the 70M ESP for the ~2M GRUB EFI stub, mounted at /boot/efi.
+  #    Keep the 196M ESP for the ~2M GRUB EFI stub, mounted at /boot/efi.
   #    Let /boot hold the kernels on a filesystem with actual room.
   #
   #  EASIEST — no repartitioning, if / is ext4/btrfs and NOT on LUKS/LVM.
