@@ -560,6 +560,129 @@ in
         };
       };
 
+      # ---- osint-tools-cli ---------------------------------------------
+      # https://github.com/Coordinate-Cat/osint-tools-cli — a TUI browser for
+      # the cipher387 OSINT tool cheat sheet. Not in nixpkgs, so built here.
+      osint-tools-cli = prev.rustPlatform.buildRustPackage {
+        pname = "osint-tools-cli";
+        version = "0.2.0";
+
+        src = prev.fetchFromGitHub {
+          owner = "Coordinate-Cat";
+          repo = "osint-tools-cli";
+          rev = "dd730b5dcff84eeecb23ffa1c3e796ea2101319f";
+          hash = "sha256-wsq+E6f4EnspVsl1Re61Bv4fHf+GIHwKj+X1KgTFaeE=";
+        };
+
+        # The repo ships a lowercase `cargo.toml`. That works on macOS and
+        # Windows, where the filesystem is case-insensitive, but cargo looks
+        # for `Cargo.toml` exactly and the build fails outright on Linux.
+        postPatch = ''
+          [ -f cargo.toml ] && mv cargo.toml Cargo.toml || true
+        '';
+
+        # cargoHash rather than cargoLock.lockFile so nothing has to be fetched
+        # at evaluation time. If the crate set ever changes, set this to
+        # lib.fakeHash, rebuild once, and paste in the hash Nix reports.
+        cargoHash = "sha256-ggn+MOfYEKJxuQP14jM0BYjK3/aMT2ddU0YnTx/l4gI=";
+
+        doCheck = false;
+
+        meta = {
+          description = "TUI for browsing the cipher387 OSINT tool collection";
+          homepage = "https://github.com/Coordinate-Cat/osint-tools-cli";
+          license = lib.licenses.mit;
+          platforms = lib.platforms.linux;
+          mainProgram = "osint-tools-cli";
+        };
+      };
+
+      # ---- SpiderFoot ---------------------------------------------------
+      # github.com/smicallef/spiderfoot, which is NOT in nixpkgs. It is also
+      # not a clean packaging job: its requirements.txt pins are from 2022
+      # (networkx <2.7 against today's 3.6, cryptography <4 against 48), and
+      # two of its deps — adblockparser and pygexf — are not in nixpkgs at all.
+      #
+      # Those pins turn out to be pip-install-time only: nothing in the code
+      # enforces them, and it was verified here that sflib/sfscan/sfwebui all
+      # import and that `sf.py --help` runs against the CURRENT library
+      # versions. So this builds the two missing deps and runs SpiderFoot from
+      # source against current nixpkgs, rather than pinning a museum of old
+      # libraries. Individual scan modules that lean on removed networkx or
+      # cryptography APIs may still misbehave; the core engine and web UI work.
+      spiderfoot =
+        let
+          adblockparser = final.python3.pkgs.buildPythonPackage {
+            pname = "adblockparser";
+            version = "0.7";
+            format = "setuptools";
+            src = prev.fetchFromGitHub {
+              owner = "scrapinghub";
+              repo = "adblockparser";
+              rev = "4089612d65018d38dbb88dd7f697bcb07814014d";
+              hash = "sha256-3Wx/VmOCaEWWvhxKBqA+IBjp67rjqrDTaqpeXaIE8pQ=";
+            };
+            doCheck = false;
+          };
+          pygexf = final.python3.pkgs.buildPythonPackage {
+            pname = "pygexf";
+            version = "0.2.2";
+            format = "setuptools";
+            src = prev.fetchFromGitHub {
+              owner = "paulgirard";
+              repo = "pygexf";
+              rev = "4ec08e9b8c381e030c30f86a562712b681d97e55";
+              hash = "sha256-tMJSRjZ2sXBmeYLHKUQMG33orBAnTtObb+x2d8IBKNA=";
+            };
+            propagatedBuildInputs = with final.python3.pkgs; [ lxml setuptools ];
+            doCheck = false;
+          };
+          pyenv = final.python3.withPackages (ps: with ps; [
+            adblockparser pygexf dnspython exifread cherrypy cherrypy-cors mako
+            beautifulsoup4 lxml netaddr pysocks requests ipwhois ipaddr
+            phonenumbers pypdf2 python-whois secure pyopenssl python-docx
+            python-pptx networkx cryptography publicsuffixlist openpyxl pyyaml
+          ]);
+        in
+        prev.stdenvNoCC.mkDerivation {
+          pname = "spiderfoot";
+          version = "0-unstable-2026";
+
+          src = prev.fetchFromGitHub {
+            owner = "smicallef";
+            repo = "spiderfoot";
+            rev = "0f815a203afebf05c98b605dba5cf0475a0ee5fd";
+            hash = "sha256-LsaLgz+tZyTUBLxa7FoJusGgMa3sgLUMZMVPZUpvWdY=";
+          };
+
+          nativeBuildInputs = [ prev.makeWrapper ];
+          dontBuild = true;
+
+          # Drop the app under libexec and expose the three entry points as
+          # wrappers that run from there with the pinned python env.
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out/libexec/spiderfoot $out/bin
+            cp -r . $out/libexec/spiderfoot/
+
+            for entry in sf:spiderfoot sfcli:spiderfoot-cli; do
+              script="''${entry%%:*}"; name="''${entry##*:}"
+              makeWrapper ${pyenv}/bin/python $out/bin/$name \
+                --add-flags "$out/libexec/spiderfoot/$script.py" \
+                --chdir "$out/libexec/spiderfoot"
+            done
+            runHook postInstall
+          '';
+
+          meta = {
+            description = "Open source OSINT automation / attack-surface recon (run from source against current deps)";
+            homepage = "https://github.com/smicallef/spiderfoot";
+            license = lib.licenses.mit;
+            platforms = lib.platforms.linux;
+            mainProgram = "spiderfoot";
+          };
+        };
+
       # ---- surf: read this before enabling ------------------------------
       # You asked for surf, and it is deliberately NOT installed. Two real
       # problems, not precautionary flags:
@@ -659,10 +782,15 @@ in
   # config installs by name is free software.
   nixpkgs.config.allowUnfree = true;
 
-  # Deliberately empty. Enabling surf (section 2) needs "libsoup-2.74.3"
-  # here — read the note there first, it is a browser running on an HTTP
-  # library with published CVEs.
-  nixpkgs.config.permittedInsecurePackages = [ ];
+  # SpiderFoot (section 2) depends on PyPDF2, which nixpkgs flags insecure —
+  # its successor is `pypdf`, but SpiderFoot imports the old name. It is only
+  # reached when SpiderFoot parses a PDF during a scan, which is a narrow and
+  # opt-in path, so the exposure is limited to that. Remove SpiderFoot and you
+  # can drop this line.
+  #
+  # (Enabling surf, also section 2, would additionally need "libsoup-2.74.3"
+  # here — read that note first, it is a browser on an HTTP library with CVEs.)
+  nixpkgs.config.permittedInsecurePackages = [ "python3.13-pypdf2-3.0.1" ];
 
   # ══════════════════════════════════════════════════════════════════════════
   #  4 · BOOT — read this if the rebuild is failing
@@ -818,6 +946,26 @@ in
     }
   ];
 
+  # ── KERNEL: pinned to 6.12 LTS for the Alfa adapter ───────────────────────
+  # This is NOT the default kernel, and the reason is the AWUS036ACS.
+  #
+  # That adapter is an RTL8811AU, and the driver with working monitor mode and
+  # packet injection is the out-of-tree morrownr/8812au (nixpkgs: rtl8812au,
+  # which covers 8811AU and 8812AU). That package declares:
+  #
+  #     broken = kernel.kernelOlder "5.10" || kernel.kernelAtLeast "6.15";
+  #
+  # NixOS 26.05 ships 6.18, so on the default kernel the driver does not build
+  # at all. 6.12 is the newest LTS under that ceiling, and the module is
+  # prebuilt in the binary cache for it, so this costs no compile time.
+  #
+  # The in-tree rtw88 driver does now cover these chips over USB (6.7+) and
+  # would work on the default kernel — but its injection support is not the
+  # known-good path, which is the entire point of this adapter. If you stop
+  # needing injection, drop these two lines and you are back on 6.18.
+  boot.kernelPackages = pkgs.linuxKernel.packages.linux_6_12;
+  boot.extraModulePackages = [ config.boot.kernelPackages.rtl8812au ];
+
   # Quieter boot, in keeping with the rest of the setup.
   boot.kernelParams = [ "quiet" "udev.log_level=3" ];
 
@@ -893,6 +1041,7 @@ in
       "kvm"
       "storage"
       "tss"             # TPM, for swtpm-backed VMs
+      "wireshark"       # capture packets without running the GUI as root
     ];
   };
 
@@ -1421,6 +1570,20 @@ in
   # ══════════════════════════════════════════════════════════════════════════
   programs.firefox.enable = true;   # Super + w
   programs.dconf.enable = true;     # GTK apps need this to read their settings
+
+  # Wireshark: use the module, not just the package. It installs a setcap
+  # wrapper around dumpcap so members of the `wireshark` group can capture
+  # without running the whole GUI as root. samadams is added to that group in
+  # section 7. programs.wireshark.package is wireshark-cli by default; set to
+  # the Qt build so you get the graphical app.
+  programs.wireshark = {
+    enable = true;
+    package = pkgs.wireshark;
+  };
+
+  # ProtonVPN's official client drives NetworkManager, which is already on
+  # (section 5). This just turns on the WireGuard plumbing it prefers.
+  networking.wireguard.enable = true;
   programs.gnupg.agent = {
     enable = true;
     pinentryPackage = pkgs.pinentry-gtk2;
@@ -1568,6 +1731,29 @@ in
                              # if you prefer it.
     python3
     sherlock                 # OSINT: hunt a username across social networks
+
+    # ---- security / recon (added on request) ----------------------------
+    # Monitor mode, packet injection and active scanning are for networks and
+    # hosts you own or have written authorisation to test. The tools do not
+    # check; that boundary is on you.
+    recon-ng                 # modular OSINT reconnaissance framework
+    theharvester             # emails, subdomains and names from public sources
+    osint-tools-cli          # the Rust TUI cheat-sheet, packaged in section 2
+    spiderfoot               # packaged from source in section 2 — `spiderfoot`
+                             #   starts the web UI, `spiderfoot-cli` is the TUI
+    nmap                     # port/network scanner
+    metasploit               # exploitation framework
+    # wireshark itself comes from programs.wireshark above, not from here —
+    # adding the package here too would bypass the dumpcap capture wrapper.
+
+    # Wireless auditing for the Alfa adapter (driver is in section 4):
+    aircrack-ng              # the injection/capture suite
+    iw                       # set monitor mode, inspect the interface
+    macchanger               # randomise the adapter's MAC
+
+    # ---- VPN ------------------------------------------------------------
+    proton-vpn               # the official Proton VPN GUI (attr is proton-vpn)
+    proton-vpn-cli           # and the `protonvpn` command-line client
   ];
 
   # st ships its own terminfo; make sure it lands in the system path so that

@@ -44,6 +44,8 @@ rest of the file reads from those bindings.
 | Privacy | Tor daemon and SOCKS proxy on `127.0.0.1:9050` |
 | Media | mpv, ani-cli, ncmpcpp/mpd, nsxiv, zathura, yt-dlp |
 | Mail / news / chat | neomutt + mutt-wizard, newsboat, abook, profanity |
+| Security / OSINT | recon-ng, theHarvester, SpiderFoot, osint-tools-cli, sherlock, nmap, Wireshark, Metasploit, aircrack-ng |
+| VPN | Proton VPN (GUI + `protonvpn` CLI) |
 
 Sections 2 and 15 list which package backs which keybinding.
 
@@ -102,6 +104,28 @@ Most first-build failures on a laptop are one of these:
    of range of a known network).
 
 If something still fails, `journalctl -b -p err` is the fastest way to see what.
+
+## The Alfa AWUS036ACS needs the pinned kernel
+
+That adapter's injection-capable driver (`rtl8812au`) is marked broken on
+NixOS 26.05's default 6.18 kernel, so section 4 pins the kernel to 6.12 LTS,
+where the module is prebuilt in the binary cache. If you ever drop the adapter,
+remove the two `boot.kernelPackages` / `boot.extraModulePackages` lines to go
+back to the latest kernel. To use the card: `sudo ip link set wlan1 down`,
+`sudo iw dev wlan1 set type monitor`, `sudo ip link set wlan1 up` — or just let
+`airmon-ng start wlan1` do it.
+
+Monitor mode and packet injection are legal only against networks you own or
+are authorised to test. The tools don't enforce that; you do.
+
+## SpiderFoot runs from source, not a nixpkgs package
+
+It isn't in nixpkgs and its dependency pins are from 2022, so it's built from
+the upstream repo against current libraries (the pins turned out to be
+install-time only — verified that the core imports and both entry points run).
+`spiderfoot` launches the web UI; `spiderfoot-cli` is the terminal client. One
+of its deps, PyPDF2, is flagged insecure and is allow-listed in section 3;
+that path is only hit when SpiderFoot parses a PDF mid-scan.
 
 ## Two things to know
 
