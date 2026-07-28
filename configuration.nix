@@ -251,10 +251,14 @@ let
   #
   # Set to null for a plain unthemed GRUB.
   #
-  # Defaulting to sleek/dark rather than catppuccin purely on size: catppuccin
-  # is 2.7M (2.3M of that is one font file) against sleek's 392K, and /boot is
-  # the one filesystem on this machine that is actually tight.
-  grubTheme = pkgs.sleek-grub-theme.override { withStyle = "dark"; };
+  # The Windows XP "Bliss" theme you picked, packaged in section 2 from the
+  # author's GitHub rather than the gnome-look download so it is pinned and
+  # reproducible. The watermark on the stock background is dealt with there.
+  #
+  # Alternatives, both already in nixpkgs:
+  #   pkgs.sleek-grub-theme.override { withStyle = "dark"; }   (392K)
+  #   pkgs.catppuccin-grub                                     (2.7M)
+  grubTheme = pkgs.xp-bliss-grub-theme;
 
   # How many old generations to keep entries for in the boot menu.
   #
@@ -369,6 +373,15 @@ in
           # Super+F1 renders the manual; point it at the store, not /usr/local.
           substituteInPlace config.h \
             --replace-fail "/usr/local/share/dwm/larbs.mom" "$out/share/dwm/larbs.mom"
+
+          # Brightness keys: upstream calls `xbacklight`, which drives the
+          # RandR backlight property. Most current Intel/AMD drivers no
+          # longer expose that, so xbacklight just prints "No outputs have
+          # backlight property" and the key appears dead. brightnessctl goes
+          # through logind instead and works without extra permissions.
+          substituteInPlace config.h \
+            --replace-fail '{ "xbacklight", "-inc", "15", NULL }' '{ "brightnessctl", "set", "10%+", NULL }' \
+            --replace-fail '{ "xbacklight", "-dec", "15", NULL }' '{ "brightnessctl", "set", "10%-", NULL }'
 
           # Splice in the extra bindings listed at the top of this file.
           cp ${larbsExtraKeys} larbs-extra-keys.h
@@ -492,6 +505,58 @@ in
           license = lib.licenses.isc;
           platforms = lib.platforms.linux;
           mainProgram = "dwmblocks";
+        };
+      };
+
+      # ---- the Windows XP "Bliss" GRUB theme ---------------------------
+      # https://www.gnome-look.org/p/2321018, built from the author's own
+      # repo rather than the gnome-look archive so the version is pinned and
+      # the build is reproducible. MIT licensed (the Bliss photograph itself
+      # is Charles O'Rear's; the author presents this as a non-commercial
+      # fan project, which a personal machine plainly is).
+      xp-bliss-grub-theme = prev.stdenvNoCC.mkDerivation {
+        pname = "xp-bliss-grub-theme";
+        version = "0-unstable-2025";
+
+        src = prev.fetchFromGitHub {
+          owner = "hashirsajid58200p";
+          repo = "windows-xp-bliss-grub-theme";
+          rev = "4766f2e94f9be8f6b7e890d62c751eedc746c3dc";
+          hash = "sha256-Vj2RU1doZGXM+y9MDe1t87jSvdACUULzQImg41o/+P8=";
+        };
+
+        dontBuild = true;
+
+        # The repo root IS the theme directory — theme.txt sits at the top and
+        # refers to assets/background.jpg relatively.
+        installPhase = ''
+          runHook preInstall
+          mkdir -p $out
+          cp -r . $out/
+          chmod -R +w $out
+
+          # The shipped assets/background.jpg is WATERMARKED. The clean copy
+          # is the awkwardly-named file the README tells you to rename by
+          # hand; do that here so the theme is right without manual steps.
+          # Both are 3840x2160, so this costs no resolution.
+          cp "$out/No watermark version – rename and place in assets folder.jpg" \
+             "$out/assets/background.jpg"
+
+          # Not part of the theme: the store copy of a GRUB theme has no use
+          # for an installer aimed at /etc/default/grub, a 4M preview, or the
+          # now-redundant background copies.
+          rm -f "$out/No watermark version – rename and place in assets folder.jpg" \
+                "$out/background.jpg" "$out/preview.jpg" \
+                "$out/install.sh" "$out/README.md" "$out/LICENSE"
+
+          runHook postInstall
+        '';
+
+        meta = {
+          description = "Windows XP Bliss GRUB theme";
+          homepage = "https://github.com/hashirsajid58200p/windows-xp-bliss-grub-theme";
+          license = lib.licenses.mit;
+          platforms = lib.platforms.linux;
         };
       };
 
@@ -1433,9 +1498,23 @@ in
     xrdb                # Super+F5
     xprop
     xwininfo
+    xev                      # THE tool for debugging a dead media key: run
+                             # `xev`, press the key, and watch the output. If
+                             # you see XF86MonBrightnessUp / XF86AudioRaiseVolume
+                             # the key is fine and the binding is at fault; if
+                             # you see F2/F3/etc, or nothing at all, the laptop
+                             # is sending plain function keys and it is an Fn /
+                             # F-Lock or firmware setting, not a NixOS problem.
     xset
     setxkbmap
-    xbacklight
+    brightnessctl            # the brightness keys on the function row. The
+                             # nixpkgs hardware.brightnessctl module was
+                             # removed precisely because current versions need
+                             # no udev rules — they use the logind API — so
+                             # installing the package is the whole setup.
+    xbacklight               # kept only because `remaps` and older scripts
+                             # reference it; the keybindings now use
+                             # brightnessctl (see the dwm patch in section 2).
     xrandr                   # displayselect (Super+F3) and dmenurecord drive this
     slop                     # region selection for dmenurecord (Super+Print)
     xclip                    # the "+ register in nvim and tmux's y binding
