@@ -64,6 +64,39 @@ X11 CLIPBOARD selection. The explicit form is mapped too, with `,` as leader:
 tmux copy-mode `y` pipes through `xclip -selection clipboard`, so nvim, tmux and
 every X app share one clipboard.
 
+## Common knobs
+
+All in section 0, at the top of `configuration.nix`:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `stAlpha` | `0.72` | Terminal transparency. Lower = more see-through. `Alt+a` / `Alt+s` adjust it live in a running terminal if you want to find your number first. |
+| `useUEFI` | `true` | Set `false` on a BIOS/MBR machine, and set `grub.device` in section 4 to your disk. |
+| `seedLarbsDotfiles` | `true` | Whether to copy Luke's dotfiles into `$HOME` on first activation. |
+
+Transparency needs a compositor, which section 8 starts (`xcompmgr`) before dwm.
+Note that `stAlpha` has to be applied in two places — st reads `alpha` from
+Xresources at startup and that silently overrides the compiled-in value. The
+config patches both from the one setting; if your home was already seeded from
+an earlier build, edit `~/.config/x11/xresources` too.
+
+## If `nixos-rebuild switch` throws errors
+
+Most first-build failures on a laptop are one of these:
+
+1. **UEFI vs BIOS mismatch.** Run `[ -d /sys/firmware/efi ] && echo UEFI || echo BIOS`
+   and set `useUEFI` to match. This is the most common one by far.
+2. **Wifi firmware.** `hardware.enableRedistributableFirmware` is on in section 5.
+   Without it most Intel/Broadcom/Realtek cards do not appear at all — no error,
+   just no interface.
+3. **Failed units at boot rather than a build error.** `systemctl --failed`
+   tells you which. Two known ones are already fixed here: mpd is no longer a
+   system service (it started before PipeWire existed and failed every boot),
+   and `NetworkManager-wait-online` is disabled (it fails whenever you boot out
+   of range of a known network).
+
+If something still fails, `journalctl -b -p err` is the fastest way to see what.
+
 ## Two things to know
 
 **Dotfiles are seeded, not managed.** On first activation, Luke's configs for lf,

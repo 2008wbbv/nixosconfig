@@ -214,6 +214,19 @@ let
   # see section 14 for exactly what this does and does not touch.
   seedLarbsDotfiles = true;
 
+  # Terminal transparency. 1.0 is fully opaque, 0.0 invisible. Upstream ships
+  # 0.8; this is lower so st is more see-through. Alt+a / Alt+s change it live
+  # in a running terminal if you want to find your own number first.
+  #
+  # This value has to be applied in two places, because st reads `alpha` from
+  # Xresources at startup and that silently overrides whatever is compiled in.
+  # Section 2 patches both, so changing this one line is enough.
+  stAlpha = "0.72";
+
+  # Set false on an older BIOS/MBR machine — see section 4. Getting this wrong
+  # is the most common reason a first `nixos-rebuild switch` blows up.
+  useUEFI = true;
+
   # ══════════════════════════════════════════════════════════════════════════
   #  Extra dwm keybindings, injected into upstream's config.h.
   #  Kept in a separate C header so no shell quoting can mangle it. It is
@@ -228,6 +241,22 @@ let
     { MODKEY|ShiftMask, XK_Tab,       spawn, {.v = (const char*[]){ "tor-browser", NULL } } },
     { MODKEY|ShiftMask, XK_backslash, spawn, {.v = (const char*[]){ TERMINAL, "-e", "tmux", "new-session", "-A", "-s", "main", NULL } } },
     { MODKEY|ShiftMask, XK_Escape,    spawn, SHCMD(TERMINAL " -e sh -c 'fastfetch; echo; printf \"[any key] \"; read -r _'") },
+  '';
+
+  # ══════════════════════════════════════════════════════════════════════════
+  #  A default wallpaper, so something is always on screen at login.
+  #  LARBS's `setbg` expects ~/.local/share/bg to exist and errors out when it
+  #  does not — which is why a fresh install otherwise boots to a grey X root
+  #  window. Section 8 falls back to this when you have not picked your own.
+  #  Replace it any time with:  setbg /path/to/your/image.png
+  # ══════════════════════════════════════════════════════════════════════════
+  defaultWallpaper = pkgs.runCommand "larbs-default-wallpaper.png" {
+    nativeBuildInputs = [ pkgs.imagemagick ];
+  } ''
+    magick -size 3840x2160 \
+      gradient:'#0d1117-#1b2733' \
+      -define png:color-type=2 \
+      "$out"
   '';
 in
 {
@@ -321,6 +350,14 @@ in
         buildInputs = with prev; [
           libx11 libxft fontconfig freetype harfbuzz libxrender
         ];
+
+        # Compiled-in transparency (see stAlpha in section 0). Note this is
+        # only half the job — Xresources overrides it at runtime, so the
+        # larbs-scripts derivation below patches that copy to match.
+        postPatch = ''
+          substituteInPlace config.h \
+            --replace-fail 'float alpha = 0.8;' 'float alpha = ${stAlpha};'
+        '';
 
         makeFlags = [ "PREFIX=$(out)" "CC=cc" ];
 
@@ -448,6 +485,13 @@ in
           # The dotfile tree is kept whole so section 14 can seed from it.
           mkdir -p $out/share/larbs-dotfiles
           cp -r .config $out/share/larbs-dotfiles/config
+
+          # st reads `alpha` from Xresources at startup, and that wins over
+          # the value compiled into the binary. Keep the two in step so the
+          # stAlpha setting in section 0 is actually what you see.
+          chmod -R +w $out/share/larbs-dotfiles
+          substituteInPlace $out/share/larbs-dotfiles/config/x11/xresources \
+            --replace-fail '*.alpha: 0.8' '*.alpha: ${stAlpha}'
           for f in .zprofile .xprofile; do
             [ -e "$f" ] && cp "$f" $out/share/larbs-dotfiles/ || true
           done
@@ -497,25 +541,60 @@ in
 
   # ══════════════════════════════════════════════════════════════════════════
   #  4 · BOOT
+  #
+  #  If `nixos-rebuild switch` fails here, it is almost always a UEFI/BIOS
+  #  mismatch. Check with:  [ -d /sys/firmware/efi ] && echo UEFI || echo BIOS
+  #  then set `useUEFI` in section 0 to match. On BIOS you must also point
+  #  `grubDevice` below at your actual disk (e.g. /dev/sda, /dev/nvme0n1).
   # ══════════════════════════════════════════════════════════════════════════
-  boot.loader.systemd-boot.enable = true;
-  boot.loader.systemd-boot.configurationLimit = 10;
-  boot.loader.efi.canTouchEfiVariables = true;
+  boot.loader = if useUEFI then {
+    systemd-boot.enable = true;
+    systemd-boot.configurationLimit = 10;
+    efi.canTouchEfiVariables = true;
+  } else {
+    grub.enable = true;
+    grub.device = "/dev/sda";     # <- the DISK, not a partition
+    grub.configurationLimit = 10;
+  };
 
   # Quieter boot, in keeping with the rest of the setup.
   boot.kernelParams = [ "quiet" "udev.log_level=3" ];
 
-  # Needed by QEMU/KVM nested virtualisation and by looking-glass, if you
-  # ever go that route. Harmless otherwise.
-  boot.kernelModules = [ "kvm-intel" "kvm-amd" ];
-  boot.extraModprobeConfig = "options kvm_intel nested=1";
+  # Deliberately NOT forcing kvm-intel/kvm-amd here. Listing both — which an
+  # earlier version of this file did — guarantees one of them fails to load
+  # on any real machine and fills your boot log with errors. The kernel
+  # autoloads the correct one from the CPU ID, so there is nothing to do.
+  #
+  # These modprobe options only take effect if the matching module is loaded,
+  # so having both lines is harmless on either vendor.
+  boot.extraModprobeConfig = ''
+    options kvm_intel nested=1
+    options kvm_amd nested=1
+  '';
 
   # ══════════════════════════════════════════════════════════════════════════
-  #  5 · NETWORKING
-  #  Super + Shift + w opens nmtui, which drives NetworkManager.
+  #  5 · NETWORKING — wifi that works on a laptop out of the box
+  #  Super + Shift + w opens nmtui, which is how you join a network.
   # ══════════════════════════════════════════════════════════════════════════
   networking.hostName = hostName;
   networking.networkmanager.enable = true;
+
+  # THE thing that makes laptop wifi work. Practically every Intel, Broadcom,
+  # Realtek and Atheros wifi chip needs a binary firmware blob, and without
+  # this the card simply does not appear — no error, no interface, nothing.
+  # It is off by default in NixOS because the blobs are redistributable but
+  # not open source.
+  hardware.enableRedistributableFirmware = true;
+
+  # Note: do NOT set `networking.wireless.enable = false` here to "avoid a
+  # conflict with wpa_supplicant". Modern NetworkManager switches wpa_supplicant
+  # on deliberately and drives it over DBus, so forcing it off breaks wifi
+  # rather than fixing it. Leave the radio to NetworkManager.
+
+  # Waits for a network at every boot and fails the unit when there isn't one
+  # yet — which on a laptop that roams is most boots. It turns a fine boot
+  # into a red "FAILED" line and a 90-second hang. Nothing here needs it.
+  systemd.services.NetworkManager-wait-online.enable = false;
 
   networking.firewall = {
     enable = true;
@@ -565,8 +644,12 @@ in
     enable = true;
     xkb = {
       layout = "us";
-      # LARBS convention: Caps Lock becomes another Escape.
-      options = "caps:escape";
+      # LARBS makes Caps Lock dual-role: HELD it is another Super, TAPPED it
+      # is Escape. The xkb half is here; the tap-for-Escape half needs xcape,
+      # which `remaps` starts in extraSessionCommands below.
+      # (An earlier version of this file used plain "caps:escape", which lost
+      # the extra Super and contradicted what Super+F1 tells you.)
+      options = "caps:super,altwin:menu_win";
     };
 
     windowManager.dwm = {
@@ -586,16 +669,35 @@ in
         # The status bar. Super+F5 restarts it.
         ${pkgs.larbs-dwmblocks}/bin/dwmblocks &
 
-        # Compositing (transparency, no tearing) and a hidden idle cursor.
+        # Compositing. st's transparency (stAlpha, section 0) does nothing
+        # without a compositor running, so this has to come up before dwm.
         ${pkgs.xcompmgr}/bin/xcompmgr &
         ${pkgs.unclutter-xfixes}/bin/unclutter &
 
         # Notifications, used by many of the LARBS scripts.
         ${pkgs.dunst}/bin/dunst &
 
-        # Wallpaper, if one has been set with `setbg`.
-        [ -f "$HOME/.local/share/bg" ] && \
-          ${pkgs.xwallpaper}/bin/xwallpaper --zoom "$HOME/.local/share/bg" &
+        # Music daemon. Runs here rather than as a system service so it comes
+        # up after PipeWire and can actually reach it — see section 10.
+        ${pkgs.mpd}/bin/mpd &
+
+        # ── WALLPAPER ────────────────────────────────────────────────────
+        # LARBS tracks the current wallpaper as a symlink at
+        # ~/.local/share/bg, and `setbg` reads it. On a fresh install that
+        # link does not exist, `setbg` exits before reaching xwallpaper, and
+        # you get a grey X root window — which is why this did not load on
+        # boot before. Point it at the bundled default the first time.
+        bg="$HOME/.local/share/bg"
+        if [ ! -e "$bg" ]; then
+          mkdir -p "$HOME/.local/share"
+          ln -sfn ${defaultWallpaper} "$bg"
+        fi
+        ${pkgs.xwallpaper}/bin/xwallpaper --zoom "$bg" &
+
+        # Caps Lock held = Super, tapped = Escape; Menu = right Super. This
+        # is what the Super+F1 manual describes, and it needs xcape running,
+        # not just an xkb option. Also sets the faster key repeat.
+        ${pkgs.larbs-scripts}/bin/remaps &
 
         true
       '';
@@ -657,21 +759,21 @@ in
   };
 
   # mpd backs Super+p, Super+comma/period and the ncmpcpp binding.
-  services.mpd = {
-    enable = true;
-    user = username;
-    settings = {
-      music_directory = "/home/${username}/Music";
-      audio_output = [
-        {
-          type = "pipewire";
-          name = "PipeWire Sound Server";
-        }
-      ];
-    };
-  };
-  # mpd runs as the user, so point it at that user's PipeWire socket.
-  systemd.services.mpd.environment.XDG_RUNTIME_DIR = "/run/user/${toString userUid}";
+  # mpd is deliberately NOT run as a system service. A system-level mpd starts
+  # at boot, before anyone has logged in, so /run/user/<uid> does not exist
+  # yet and it cannot reach the user's PipeWire socket — the unit just fails,
+  # red, on every single boot. If you saw errors after a rebuild, this was one
+  # of them.
+  #
+  # LARBS starts mpd from the X session instead, and the seeded
+  # ~/.config/mpd/mpd.conf already declares the PipeWire output plus the fifo
+  # that ncmpcpp's visualiser reads. Section 8 autostarts it; the directories
+  # it expects are created below so it never fails on a fresh home.
+  systemd.tmpfiles.rules = [
+    "d /home/${username}/Music 0755 ${username} users -"
+    "d /home/${username}/.config/mpd 0755 ${username} users -"
+    "d /home/${username}/.config/mpd/playlists 0755 ${username} users -"
+  ];
 
   # ══════════════════════════════════════════════════════════════════════════
   # 11 · VIRTUALISATION — QEMU / KVM
@@ -1105,6 +1207,7 @@ in
     ffmpeg
     nsxiv                    # image viewer
     zathura                  # Super+F1 renders the dwm manual into this
+    mpd                      # started from the X session, see sections 8 & 10
     mpc                      # the music keybindings shell out to this
     ncmpcpp                  # Super+m
     pulsemixer               # Super+F4
