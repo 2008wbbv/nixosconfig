@@ -270,10 +270,13 @@ let
   # (e.g. "1366x768"). "auto" is the safe fallback.
   grubResolution = "auto";
 
-  # Where your EFI System Partition is mounted. NixOS's installer guide uses
-  # /boot, but plenty of setups (and dual-boots alongside Windows) use
-  # /boot/efi. Check with:  lsblk -f   — the ESP is the small vfat/FAT32 one.
-  # If this does not match, systemd-boot installation fails.
+  # Where your EFI System Partition is mounted.
+  #
+  # ⚠ IF YOUR ESP IS SMALL (yours is ~70M), READ THE "TINY ESP" BLOCK AT THE
+  #   TOP OF SECTION 4. NixOS's own installer creates a 512M ESP, and a
+  #   single generation's kernel + initrd is most of that on its own, so 70M
+  #   cannot work while /boot IS the ESP. The fix is to stop putting kernels
+  #   on the ESP — set this to "/boot/efi" once you have moved the mount.
   espMountPoint = "/boot";
 
   # Writing EFI variables fails on some firmware and in some VMs. If the
@@ -631,8 +634,34 @@ in
   #  you have successfully booted via GRUB, and only then, /boot/loader and
   #  /boot/EFI/systemd are dead weight and safe to remove.
   #
-  #  If /boot is under ~300M even when empty, it is genuinely too small for
-  #  NixOS. Set bootGenerationLimit = 1, or resize the ESP.
+  #  ── 0b. TINY ESP (yours is ~70M) ──────────────────────────────────────
+  #  For reference, NixOS's own installation manual partitions a 512M ESP:
+  #      parted /dev/sda -- mkpart ESP fat32 1MB 512MB
+  #  70M cannot hold one kernel + initrd, let alone three, so no amount of
+  #  garbage collecting fixes it while /boot IS the ESP.
+  #
+  #  The good news is that moving to GRUB already solved the hard part.
+  #  systemd-boot can only read FAT, so it forces kernels onto the ESP.
+  #  GRUB reads ext4/btrfs directly and keeps kernels in <bootpath>/kernels
+  #  (install-grub.pl), which does NOT have to be the ESP. So:
+  #
+  #    Keep the 70M ESP for the ~2M GRUB EFI stub, mounted at /boot/efi.
+  #    Let /boot hold the kernels on a filesystem with actual room.
+  #
+  #  EASIEST — no repartitioning, if / is ext4/btrfs and NOT on LUKS/LVM.
+  #  /boot just becomes a normal directory on the root filesystem:
+  #
+  #      sudo umount /boot                       # unmount the ESP
+  #      sudo mkdir -p /boot/efi
+  #      sudo mount /dev/<esp> /boot/efi         # remount it deeper
+  #      # edit hardware-configuration.nix: change the ESP's
+  #      #   fileSystems."/boot"  ->  fileSystems."/boot/efi"
+  #      # then set espMountPoint = "/boot/efi" in section 0
+  #      sudo nixos-rebuild switch
+  #
+  #  If / is on LUKS or LVM, GRUB cannot read it unaided — you need a small
+  #  separate ext4 /boot partition (1G is plenty) instead, with the ESP still
+  #  at /boot/efi. Same espMountPoint change, extra fileSystems entry.
   #
   #  ── 1. UEFI vs BIOS ───────────────────────────────────────────────────
   #      [ -d /sys/firmware/efi ] && echo UEFI || echo BIOS
