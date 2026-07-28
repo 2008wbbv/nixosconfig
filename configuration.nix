@@ -790,7 +790,24 @@ in
   #
   # (Enabling surf, also section 2, would additionally need "libsoup-2.74.3"
   # here — read that note first, it is a browser on an HTTP library with CVEs.)
-  nixpkgs.config.permittedInsecurePackages = [ "python3.13-pypdf2-3.0.1" ];
+  nixpkgs.config.permittedInsecurePackages = [
+    "python3.13-pypdf2-3.0.1"
+
+    # bitwarden-desktop (section 15) bundles Electron 39, which nixpkgs now
+    # marks EOL. This is a packaging lag — the Bitwarden app itself is current
+    # and maintained — but it does mean the desktop vault runs on a browser
+    # engine no longer getting security fixes. If that bothers you for a
+    # password manager, drop bitwarden-desktop and this line and use the
+    # `bw` CLI (no Electron) or the browser extension instead.
+    "electron-39.8.10"
+
+    # nheko (section 15) depends on libolm for Matrix end-to-end encryption.
+    # libolm is deprecated upstream in favour of vodozemac and carries known
+    # unpatched side-channel weaknesses, which is why nixpkgs flags it — but
+    # nheko has no other backend, so this is required to have nheko at all.
+    # Removing nheko lets you drop this line.
+    "olm-3.2.16"
+  ];
 
   # ══════════════════════════════════════════════════════════════════════════
   #  4 · BOOT — read this if the rebuild is failing
@@ -1220,6 +1237,14 @@ in
     client.enable = true;           # SOCKS proxy on 127.0.0.1:9050
   };
   # The `torsocks` wrapper itself is installed in section 15.
+
+  # I2P — the other anonymity network. Run as a router daemon (its own `i2p`
+  # user) rather than a desktop app you launch, since it needs to stay up to
+  # build tunnels. Manage it and browse eepsites through the web console at
+  #   http://127.0.0.1:7657
+  # with the HTTP proxy it exposes on 127.0.0.1:4444. Nothing routes through
+  # I2P until you point an application at that proxy.
+  services.i2p.enable = true;
 
   # ══════════════════════════════════════════════════════════════════════════
   # 13 · SHELL, EDITOR, MULTIPLEXER
@@ -1754,6 +1779,14 @@ in
     # ---- VPN ------------------------------------------------------------
     proton-vpn               # the official Proton VPN GUI (attr is proton-vpn)
     proton-vpn-cli           # and the `protonvpn` command-line client
+
+    # ---- password manager, chat, anonymity net -------------------------
+    bitwarden-desktop        # the GUI vault (attr is bitwarden-desktop, not
+                             #   plain `bitwarden`, which does not exist)
+    bitwarden-cli            # the `bw` command-line client
+    nheko                    # Matrix chat client (Qt)
+    # i2p itself is not a package here — it runs as a router daemon, enabled
+    # just below. The `i2p` command still ends up on PATH via the service.
   ];
 
   # st ships its own terminfo; make sure it lands in the system path so that

@@ -46,6 +46,7 @@ rest of the file reads from those bindings.
 | Mail / news / chat | neomutt + mutt-wizard, newsboat, abook, profanity |
 | Security / OSINT | recon-ng, theHarvester, SpiderFoot, osint-tools-cli, sherlock, nmap, Wireshark, Metasploit, aircrack-ng |
 | VPN | Proton VPN (GUI + `protonvpn` CLI) |
+| Passwords / chat / anon | Bitwarden (desktop + `bw` CLI), nheko (Matrix), I2P router |
 
 Sections 2 and 15 list which package backs which keybinding.
 
@@ -126,6 +127,25 @@ install-time only — verified that the core imports and both entry points run).
 `spiderfoot` launches the web UI; `spiderfoot-cli` is the terminal client. One
 of its deps, PyPDF2, is flagged insecure and is allow-listed in section 3;
 that path is only hit when SpiderFoot parses a PDF mid-scan.
+
+## I2P runs as a service
+
+Enabled via `services.i2p`, so the router comes up at boot under its own `i2p`
+user and keeps building tunnels. Manage it and browse eepsites from the web
+console at `http://127.0.0.1:7657`; its HTTP proxy is `127.0.0.1:4444`. Nothing
+routes through I2P until you point an app at that proxy.
+
+## Three allow-listed insecure packages
+
+Section 3 allow-lists three packages nixpkgs flags as insecure, each for a
+named reason and each tied to one app you can remove to drop it:
+
+- **`electron-39.8.10`** — Bitwarden desktop bundles an EOL Electron. The app
+  is current; the browser engine under it isn't getting fixes. The `bw` CLI
+  and browser extension avoid it.
+- **`olm-3.2.16`** — nheko's Matrix E2E library, deprecated upstream for
+  vodozemac but the only backend nheko has.
+- **`python3.13-pypdf2-3.0.1`** — SpiderFoot's PDF parser, only reached mid-scan.
 
 ## Two things to know
 
