@@ -258,12 +258,11 @@ let
 
   # How many old generations to keep entries for in the boot menu.
   #
-  # This is the setting that fills /boot. NixOS keeps a kernel AND an initrd
-  # in /boot for every generation listed here, and those run 100-150M EACH.
-  # At the previous value of 10 that is well over a gigabyte — more than most
-  # EFI partitions hold, which is exactly the "No space left on device" you
-  # hit. Three is plenty to roll back with.
-  bootGenerationLimit = 3;
+  # Back to 10 now that /boot lives on the root filesystem. GRUB only copies
+  # kernels into /boot when /boot is on a different device from /nix/store
+  # (install-grub.pl:107); once both are on nvme0n1p5 it copies nothing and
+  # just points at the store, so the menu length costs essentially no disk.
+  bootGenerationLimit = 10;
 
   # The theme needs a graphical mode to draw into. If the menu comes up
   # garbled or at the wrong size, try "auto", or match your panel exactly
@@ -272,12 +271,11 @@ let
 
   # Where your EFI System Partition is mounted.
   #
-  # ⚠ IF YOUR ESP IS SMALL (yours is 196M), READ THE "SMALL ESP" BLOCK AT THE
-  #   TOP OF SECTION 4. NixOS's own installer creates a 512M ESP, and a single
-  #   generation's kernel + initrd can be 100M+, so 196M cannot hold several
-  #   while /boot IS the ESP. The fix is to stop putting kernels on the ESP —
-  #   set this to "/boot/efi" once you have moved the mount.
-  espMountPoint = "/boot";
+  # ⚠ THIS MUST MATCH REALITY BEFORE YOU REBUILD. It is set to /boot/efi,
+  #   which assumes you have already moved the mount — see the "SMALL ESP"
+  #   block at the top of section 4 for the three commands. Rebuilding with
+  #   this set while the ESP is still mounted at /boot will fail.
+  espMountPoint = "/boot/efi";
 
   # Writing EFI variables fails on some firmware and in some VMs. If the
   # rebuild dies with an efivars / "Failed to write" style error, set this
@@ -650,20 +648,40 @@ in
   #    Keep the 196M ESP for the ~2M GRUB EFI stub, mounted at /boot/efi.
   #    Let /boot hold the kernels on a filesystem with actual room.
   #
-  #  EASIEST — no repartitioning, if / is ext4/btrfs and NOT on LUKS/LVM.
-  #  /boot just becomes a normal directory on the root filesystem:
+  #  THIS MACHINE'S LAYOUT (from lsblk):
+  #      nvme0n1p1  vfat FAT32  E29F-A4D9   196M   the ESP, shared with Windows
+  #      nvme0n1p3  ntfs                          Windows
+  #      nvme0n1p4  ntfs                          Windows recovery
+  #      nvme0n1p5  ext4  "root"                  NixOS  /  and  /nix/store
   #
-  #      sudo umount /boot                       # unmount the ESP
+  #  Root is plain ext4 — no LUKS, no LVM — which GRUB reads natively, so
+  #  /boot does not need to be its own partition at all. It becomes a plain
+  #  directory on nvme0n1p5 alongside /nix/store, and then GRUB stops copying
+  #  kernels entirely: install-grub.pl only sets copyKernels when /boot is on
+  #  a different device from /nix/store. Same device, no copies, no growth.
+  #
+  #  Do these three FIRST, then rebuild — espMountPoint in section 0 is
+  #  already set to /boot/efi and the rebuild fails if the mount disagrees:
+  #
+  #      sudo umount /boot
   #      sudo mkdir -p /boot/efi
-  #      sudo mount /dev/<esp> /boot/efi         # remount it deeper
-  #      # edit hardware-configuration.nix: change the ESP's
-  #      #   fileSystems."/boot"  ->  fileSystems."/boot/efi"
-  #      # then set espMountPoint = "/boot/efi" in section 0
+  #      sudo mount /dev/nvme0n1p1 /boot/efi
+  #
+  #  and change the ESP entry in hardware-configuration.nix from
+  #  fileSystems."/boot" to fileSystems."/boot/efi" (device stays
+  #  /dev/disk/by-uuid/E29F-A4D9), then:
+  #
   #      sudo nixos-rebuild switch
   #
-  #  If / is on LUKS or LVM, GRUB cannot read it unaided — you need a small
-  #  separate ext4 /boot partition (1G is plenty) instead, with the ESP still
-  #  at /boot/efi. Same espMountPoint change, extra fileSystems entry.
+  #  Nothing is reformatted and Windows' EFI files are untouched. The old
+  #  systemd-boot files stay on the ESP as a fallback: if GRUB misbehaves you
+  #  can still pick the old entry from the firmware boot menu. Once you have
+  #  booted through GRUB successfully, /boot/efi/loader and
+  #  /boot/efi/EFI/systemd are dead weight and safe to delete.
+  #
+  #  (If root were on LUKS or LVM, GRUB could not read it unaided and you
+  #  would need a small separate ext4 /boot partition instead. Not the case
+  #  here.)
   #
   #  ── 1. UEFI vs BIOS ───────────────────────────────────────────────────
   #      [ -d /sys/firmware/efi ] && echo UEFI || echo BIOS
@@ -708,8 +726,12 @@ in
         gfxmodeEfi = grubResolution;
         gfxmodeBios = grubResolution;
 
-        # Uncomment if you dual-boot and want Windows/other distros detected.
-        # useOSProber = true;
+        # REQUIRED here, because this machine dual-boots Windows (nvme0n1p3
+        # and p4 are NTFS). systemd-boot found Windows on its own — it picks
+        # up any EFI bootloader already on the shared ESP — but GRUB does not
+        # look unless os-prober runs. Without this, switching bootloaders
+        # silently loses the Windows entry.
+        useOSProber = true;
       };
     })
 
