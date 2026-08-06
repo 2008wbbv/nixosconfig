@@ -1609,6 +1609,17 @@ in
   # ProtonVPN's official client drives NetworkManager, which is already on
   # (section 5). This just turns on the WireGuard plumbing it prefers.
   networking.wireguard.enable = true;
+
+  # Steam. Use the module rather than the package: it pulls in the 32-bit
+  # graphics stack (hardware.graphics.enable32Bit), which almost every game
+  # needs and which a bare `steam` in systemPackages does not give you.
+  programs.steam = {
+    enable = true;
+    protontricks.enable = true;     # per-game Wine tweaks
+    # remotePlay / dedicatedServer open firewall ports; left off deliberately
+    # since section 5 keeps the firewall closed. Enable if you actually use
+    # Steam Remote Play or host servers.
+  };
   programs.gnupg.agent = {
     enable = true;
     pinentryPackage = pkgs.pinentry-gtk2;
@@ -1648,6 +1659,12 @@ in
                              # PipeWire is still the sound server (section 10);
                              # this is only the client tool.
     ts                       # task-spooler, used by LARBS's queue scripts
+    pokeget-rs               # `pokeget` — the attribute is pokeget-rs, NOT
+                             # pokeget, which is what the "undefined variable
+                             # 'pokeget'" error was. The binary is still
+                             # called `pokeget`. Pipe it into fastfetch with
+                             # `pokeget pikachu | fastfetch --file-raw -` if
+                             # you want a sprite instead of the OS logo.
 
     # ---- media ----------------------------------------------------------
     mpv                      # video
@@ -1663,6 +1680,13 @@ in
     pavucontrol
     playerctl
     mediainfo
+
+    # ---- gaming ---------------------------------------------------------
+    # Steam itself is NOT here — it comes from programs.steam below. Putting
+    # the bare package in this list gives you a Steam that launches and then
+    # fails on most games, because the module is what sets
+    # hardware.graphics.enable32Bit and the 32-bit driver stack games need.
+    protonup-qt              # manage Proton-GE / Wine-GE versions for Steam
 
     # ---- mail, news, chat, notes ---------------------------------------
     neomutt                  # Super+e
