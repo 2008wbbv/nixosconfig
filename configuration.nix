@@ -816,8 +816,10 @@ in
   #  /boot is full. It is almost never actually about GRUB — NixOS keeps a
   #  kernel and an initrd in /boot for EVERY generation in the boot menu, at
   #  100-150M each, and EFI partitions are often only 512M (100M on laptops
-  #  that shipped with Windows). `bootGenerationLimit` in section 0 is now 3
-  #  instead of 10, which is the durable fix. To dig out right now:
+  #  that shipped with Windows). The durable fix on THIS machine is the ESP
+  #  move in 0b below, which stops kernels being copied to /boot at all —
+  #  that is why `bootGenerationLimit` is back at 10 rather than lowered.
+  #  To dig out right now:
   #
   #      df -h /boot                     # how bad is it
   #      du -sh /boot/* | sort -h        # what is eating it
@@ -959,6 +961,36 @@ in
       message = ''
         systemd-boot requires UEFI firmware. This machine is configured as
         BIOS (useUEFI = false), so set useGrub = true in section 0.
+      '';
+    }
+
+    # Catch the ESP-mount mismatch HERE, at evaluation, instead of letting it
+    # fail much later while the bootloader is being installed.
+    #
+    # NixOS does not check this itself: you can happily set
+    # efiSysMountPoint = "/boot/efi" while hardware-configuration.nix still
+    # mounts the ESP at /boot, and everything evaluates fine right up until
+    # `nixos-rebuild switch` tries to install GRUB into a directory that is
+    # not the EFI partition. This turns that into an obvious early error.
+    {
+      assertion = !useUEFI || builtins.hasAttr espMountPoint config.fileSystems;
+      message = ''
+        espMountPoint is set to "${espMountPoint}", but hardware-configuration.nix
+        declares no filesystem mounted there.
+
+        You are part-way through moving the ESP off /boot (see the SMALL ESP
+        block in section 4). Finish it:
+
+            sudo umount /boot
+            sudo mkdir -p /boot/efi
+            sudo mount /dev/nvme0n1p1 /boot/efi
+            sudo nixos-generate-config      # regenerates hardware-configuration.nix
+                                            # (it does NOT touch configuration.nix —
+                                            #  the "not overwriting" warning is expected)
+
+        Or, to stay as you are for now, set espMountPoint = "/boot" in section 0 —
+        but then kernels keep landing on the 196M EFI partition and it will fill
+        up again.
       '';
     }
   ];
