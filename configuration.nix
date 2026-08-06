@@ -1648,10 +1648,25 @@ in
   programs.steam = {
     enable = true;
     protontricks.enable = true;     # per-game Wine tweaks
+
+    # PROTON. Valve's own Proton ships inside Steam and needs nothing here.
+    # This adds Proton-GE, the community build with the extra media codecs
+    # and game-specific patches, and it is the part worth doing declaratively:
+    # extraCompatPackages sets STEAM_EXTRA_COMPAT_TOOLS_PATHS
+    # (steam.nix:61), and proton-ge-bin exposes a `steamcompattool` output
+    # that is exactly what Steam looks for. So GE shows up in the
+    # compatibility dropdown on next launch, with no protonup-qt run needed
+    # and nothing living in your home directory.
+    extraCompatPackages = [ pkgs.proton-ge-bin ];
+
     # remotePlay / dedicatedServer open firewall ports; left off deliberately
     # since section 5 keeps the firewall closed. Enable if you actually use
     # Steam Remote Play or host servers.
   };
+
+  # Drops the CPU governor into performance mode while a game is running and
+  # puts it back afterwards. Steam picks this up automatically.
+  programs.gamemode.enable = true;
   programs.gnupg.agent = {
     enable = true;
     pinentryPackage = pkgs.pinentry-gtk2;
@@ -1718,7 +1733,13 @@ in
     # the bare package in this list gives you a Steam that launches and then
     # fails on most games, because the module is what sets
     # hardware.graphics.enable32Bit and the 32-bit driver stack games need.
-    protonup-qt              # manage Proton-GE / Wine-GE versions for Steam
+    protonup-qt              # GUI for managing Proton-GE versions. Largely
+                             # redundant now that extraCompatPackages installs
+                             # GE declaratively, but handy for pulling a
+                             # specific older build for one stubborn game.
+    mangohud                 # FPS/frametime overlay. Per-game launch option:
+                             #   mangohud %command%
+    winetricks               # DLL/runtime tweaks for Wine prefixes
 
     # ---- mail, news, chat, notes ---------------------------------------
     neomutt                  # Super+e
