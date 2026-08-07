@@ -1678,6 +1678,21 @@ in
   # which makes ordinary downloaded binaries (launchers, installers, IDEs)
   # run without patchelf or an FHS wrapper.
   programs.nix-ld.enable = true;
+
+  # nix-ld's default library set is derived from systemd and nix, so it has
+  # no webkit — and a Tauri app is nothing but a webkit window. These are the
+  # Linux deps the Emerald launcher documents (libwebkit2gtk-4.1,
+  # libappindicator3, librsvg2), so its .AppImage/.deb build runs too.
+  #
+  # None of this is needed if you install it from upstream's flake, which is
+  # the recommended route — this only matters for the prebuilt downloads.
+  programs.nix-ld.libraries = with pkgs; [
+    webkitgtk_4_1
+    libappindicator-gtk3
+    librsvg
+    gtk3
+    openssl
+  ];
   programs.gnupg.agent = {
     enable = true;
     pinentryPackage = pkgs.pinentry-gtk2;
@@ -1755,15 +1770,17 @@ in
                              # sandbox:  steam-run ./whatever
                              # The escape hatch when nix-ld above is not enough.
 
-    # ---- Minecraft ------------------------------------------------------
-    # Minecraft is Java, so it runs NATIVELY on Linux — putting a Windows
-    # launcher through Proton is fighting the platform for no gain, and is a
-    # common source of exit-127 style failures.
-    prismlauncher            # properly packaged, handles legacy versions and
-                             # per-instance Java selection
-    temurin-bin              # JDK 21, for modern Minecraft
-    jdk8                     # legacy versions (roughly 1.16 and older) still
-                             # want Java 8; Prism can point an instance at it
+    # ---- Minecraft Legacy Console Edition (Emerald launcher) ------------
+    # Install the launcher from its OWN flake, not from here — upstream ships
+    # one, which is the supported path on NixOS:
+    #
+    #   nix profile install github:LCE-Hub/LCE-Emerald-Launcher
+    #
+    # Flakes are already enabled in section 3, so that works as-is.
+    #
+    # Note the launcher is a native Tauri app but it still drives Wine/Proton
+    # to run the actual game, so programs.steam and proton-ge-bin above are
+    # doing real work here — this is not a case where Proton can be skipped.
 
     # ---- mail, news, chat, notes ---------------------------------------
     neomutt                  # Super+e
