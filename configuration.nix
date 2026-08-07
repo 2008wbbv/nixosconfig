@@ -1667,6 +1667,17 @@ in
   # Drops the CPU governor into performance mode while a game is running and
   # puts it back afterwards. Steam picks this up automatically.
   programs.gamemode.enable = true;
+
+  # ── "exit status 127" on a downloaded binary ──────────────────────────────
+  # 127 means "command not found", and on NixOS it usually is not the command
+  # that is missing — it is the ELF loader. Prebuilt Linux binaries hardcode
+  # /lib64/ld-linux-x86-64.so.2 as their interpreter, NixOS has no /lib64, so
+  # the kernel cannot start them and reports "not found".
+  #
+  # nix-ld provides that loader path and a library set for exactly this case,
+  # which makes ordinary downloaded binaries (launchers, installers, IDEs)
+  # run without patchelf or an FHS wrapper.
+  programs.nix-ld.enable = true;
   programs.gnupg.agent = {
     enable = true;
     pinentryPackage = pkgs.pinentry-gtk2;
@@ -1740,6 +1751,19 @@ in
     mangohud                 # FPS/frametime overlay. Per-game launch option:
                              #   mangohud %command%
     winetricks               # DLL/runtime tweaks for Wine prefixes
+    steam-run                # run any prebuilt Linux binary inside an FHS
+                             # sandbox:  steam-run ./whatever
+                             # The escape hatch when nix-ld above is not enough.
+
+    # ---- Minecraft ------------------------------------------------------
+    # Minecraft is Java, so it runs NATIVELY on Linux — putting a Windows
+    # launcher through Proton is fighting the platform for no gain, and is a
+    # common source of exit-127 style failures.
+    prismlauncher            # properly packaged, handles legacy versions and
+                             # per-instance Java selection
+    temurin-bin              # JDK 21, for modern Minecraft
+    jdk8                     # legacy versions (roughly 1.16 and older) still
+                             # want Java 8; Prism can point an instance at it
 
     # ---- mail, news, chat, notes ---------------------------------------
     neomutt                  # Super+e
