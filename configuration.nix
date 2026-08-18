@@ -1721,6 +1721,11 @@ in
     bat ripgrep fd eza zoxide starship
     tree jq unzip zip atool
     wget curl git gnumake
+    claude-code              # unfree, but section 3 already sets allowUnfree,
+                             # so this needs no flags. Declaring it here also
+                             # keeps it on the 26.05 channel — `nix profile add
+                             # nixpkgs#claude-code` pulls from nixpkgs-unstable
+                             # instead, quietly mixing channels on a 26.05 box.
     bc                       # Super+apostrophe calculator, Ctrl+a in zsh
     trash-cli
     psmisc                   # `killall`, which several bindings below need:
